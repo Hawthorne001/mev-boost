@@ -164,12 +164,6 @@ type bidResp struct {
 	relays   []types.RelayEntry
 }
 
-// bidRespKey is used as key for the bids cache
-type bidRespKey struct {
-	slot      uint64
-	blockHash string
-}
-
 // bidInfo is used to store bid response fields for logging and validation
 type bidInfo struct {
 	blockHash   phase0.Hash32
@@ -248,17 +242,19 @@ func checkRelaySignature(bid *builderSpec.VersionedSignedBuilderBid, domain phas
 
 func getPayloadResponseIsEmpty(payload *builderApi.VersionedSubmitBlindedBlockResponse) bool {
 	switch payload.Version {
-	case spec.DataVersionCapella:
-		if payload.Capella == nil || payload.Capella.BlockHash == nilHash {
-			return true
-		}
 	case spec.DataVersionDeneb:
 		if payload.Deneb == nil || payload.Deneb.ExecutionPayload == nil ||
 			payload.Deneb.ExecutionPayload.BlockHash == nilHash ||
 			payload.Deneb.BlobsBundle == nil {
 			return true
 		}
-	case spec.DataVersionUnknown, spec.DataVersionPhase0, spec.DataVersionAltair, spec.DataVersionBellatrix:
+	case spec.DataVersionElectra:
+		if payload.Electra == nil || payload.Electra.ExecutionPayload == nil ||
+			payload.Electra.ExecutionPayload.BlockHash == nilHash ||
+			payload.Electra.BlobsBundle == nil {
+			return true
+		}
+	case spec.DataVersionUnknown, spec.DataVersionPhase0, spec.DataVersionAltair, spec.DataVersionBellatrix, spec.DataVersionCapella:
 		return true
 	}
 	return false
