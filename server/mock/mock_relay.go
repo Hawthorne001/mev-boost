@@ -1,8 +1,10 @@
 package mock
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,11 +15,13 @@ import (
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiCapella "github.com/attestantio/go-builder-client/api/capella"
 	builderApiDeneb "github.com/attestantio/go-builder-client/api/deneb"
+	builderApiElectra "github.com/attestantio/go-builder-client/api/electra"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/flashbots/go-boost-utils/bls"
@@ -156,12 +160,29 @@ func (m *Relay) handleRegisterValidator(w http.ResponseWriter, req *http.Request
 
 // defaultHandleRegisterValidator returns the default handler for handleRegisterValidator
 func (m *Relay) defaultHandleRegisterValidator(w http.ResponseWriter, req *http.Request) {
-	payload := []builderApiV1.SignedValidatorRegistration{}
-	decoder := json.NewDecoder(req.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&payload); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	reqContentType := req.Header.Get("Content-Type")
+	regBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	req.Body.Close()
+	if reqContentType == "" || reqContentType == "application/json" {
+		var payload []builderApiV1.SignedValidatorRegistration
+		decoder := json.NewDecoder(bytes.NewReader(regBytes))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else if reqContentType == "application/octet-stream" {
+		var validatorRegistrations builderApiV1.SignedValidatorRegistrations
+		if err := validatorRegistrations.UnmarshalSSZ(regBytes); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		panic("invalid content type: " + reqContentType)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -183,11 +204,9 @@ func (m *Relay) MakeGetHeaderResponse(value uint64, blockHash, parentHash, publi
 			Value:  uint256.NewInt(value),
 			Pubkey: HexToPubkey(publicKey),
 		}
-
 		// Sign the message.
 		signature, err := ssz.SignMessage(message, ssz.DomainBuilder, m.secretKey)
 		require.NoError(m.t, err)
-
 		return &builderSpec.VersionedSignedBuilderBid{
 			Version: spec.DataVersionCapella,
 			Capella: &builderApiCapella.SignedBuilderBid{
@@ -215,6 +234,31 @@ func (m *Relay) MakeGetHeaderResponse(value uint64, blockHash, parentHash, publi
 		return &builderSpec.VersionedSignedBuilderBid{
 			Version: spec.DataVersionDeneb,
 			Deneb: &builderApiDeneb.SignedBuilderBid{
+				Message:   message,
+				Signature: signature,
+			},
+		}
+	case spec.DataVersionElectra:
+		message := &builderApiElectra.BuilderBid{
+			Header: &deneb.ExecutionPayloadHeader{
+				BlockHash:       HexToHash(blockHash),
+				ParentHash:      HexToHash(parentHash),
+				WithdrawalsRoot: phase0.Root{},
+				BaseFeePerGas:   uint256.NewInt(0),
+			},
+			BlobKZGCommitments: make([]deneb.KZGCommitment, 0),
+			ExecutionRequests:  &electra.ExecutionRequests{},
+			Value:              uint256.NewInt(value),
+			Pubkey:             HexToPubkey(publicKey),
+		}
+
+		// Sign the message.
+		signature, err := ssz.SignMessage(message, ssz.DomainBuilder, m.secretKey)
+		require.NoError(m.t, err)
+
+		return &builderSpec.VersionedSignedBuilderBid{
+			Version: spec.DataVersionElectra,
+			Electra: &builderApiElectra.SignedBuilderBid{
 				Message:   message,
 				Signature: signature,
 			},
@@ -249,7 +293,7 @@ func (m *Relay) defaultHandleGetHeader(w http.ResponseWriter) {
 		"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 		"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 		"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
-		spec.DataVersionCapella,
+		spec.DataVersionDeneb,
 	)
 	if m.GetHeaderResponse != nil {
 		response = m.GetHeaderResponse
@@ -266,12 +310,20 @@ func (m *Relay) defaultHandleGetHeader(w http.ResponseWriter) {
 func (m *Relay) MakeGetPayloadResponse(parentHash, blockHash, feeRecipient string, blockNumber uint64, version spec.DataVersion) *builderApi.VersionedSubmitBlindedBlockResponse {
 	return &builderApi.VersionedSubmitBlindedBlockResponse{
 		Version: version,
-		Capella: &capella.ExecutionPayload{
-			ParentHash:   HexToHash(parentHash),
-			BlockHash:    HexToHash(blockHash),
-			BlockNumber:  blockNumber,
-			FeeRecipient: HexToAddress(feeRecipient),
-			Withdrawals:  make([]*capella.Withdrawal, 0),
+		Deneb: &builderApiDeneb.ExecutionPayloadAndBlobsBundle{
+			ExecutionPayload: &deneb.ExecutionPayload{
+				ParentHash:    HexToHash(parentHash),
+				BlockHash:     HexToHash(blockHash),
+				BlockNumber:   blockNumber,
+				FeeRecipient:  HexToAddress(feeRecipient),
+				BaseFeePerGas: uint256.NewInt(0),
+				Withdrawals:   make([]*capella.Withdrawal, 0),
+			},
+			BlobsBundle: &builderApiDeneb.BlobsBundle{
+				Blobs:       make([]deneb.Blob, 0),
+				Commitments: make([]deneb.KZGCommitment, 0),
+				Proofs:      make([]deneb.KZGProof, 0),
+			},
 		},
 	}
 }
@@ -300,7 +352,7 @@ func (m *Relay) DefaultHandleGetPayload(w http.ResponseWriter) {
 		"0x534809bd2b6832edff8d8ce4cb0e50068804fd1ef432c8362ad708a74fdc0e46",
 		"0xdb65fEd33dc262Fe09D9a2Ba8F80b329BA25f941",
 		12345,
-		spec.DataVersionCapella,
+		spec.DataVersionDeneb,
 	)
 
 	if m.GetPayloadResponse != nil {

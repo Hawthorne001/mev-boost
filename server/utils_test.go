@@ -13,7 +13,6 @@ import (
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiDeneb "github.com/attestantio/go-builder-client/api/deneb"
 	"github.com/attestantio/go-eth2-client/spec"
-	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/attestantio/go-eth2-client/spec/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/flashbots/mev-boost/config"
@@ -47,7 +46,7 @@ func TestSendHTTPRequestUserAgent(t *testing.T) {
 	customUA := "test-user-agent"
 	expectedUA := fmt.Sprintf("mev-boost/%s %s", config.Version, customUA)
 	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		require.Equal(t, expectedUA, r.Header.Get("User-Agent"))
+		require.Equal(t, expectedUA, r.Header.Get("User-Agent")) //nolint:testifylint // if we fail here the test has failed
 		done <- true
 	}))
 	code, err := SendHTTPRequest(context.Background(), *http.DefaultClient, http.MethodGet, ts.URL, UserAgent(customUA), nil, nil, nil)
@@ -59,7 +58,7 @@ func TestSendHTTPRequestUserAgent(t *testing.T) {
 	// Test without custom UA
 	expectedUA = fmt.Sprintf("mev-boost/%s", config.Version)
 	ts = httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		require.Equal(t, expectedUA, r.Header.Get("User-Agent"))
+		require.Equal(t, expectedUA, r.Header.Get("User-Agent")) //nolint:testifylint  // if we fail here the test has failed
 		done <- true
 	}))
 	code, err = SendHTTPRequest(context.Background(), *http.DefaultClient, http.MethodGet, ts.URL, "", nil, nil, nil)
@@ -78,7 +77,7 @@ func TestSendHTTPRequestGzip(t *testing.T) {
 	require.NoError(t, zw.Close())
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "gzip", r.Header.Get("Accept-Encoding"))
+		require.Equal(t, "gzip", r.Header.Get("Accept-Encoding")) //nolint:testifylint // if this fails the test is invalid
 		w.Header().Set("Content-Encoding", "gzip")
 		_, _ = w.Write(buf.Bytes())
 	}))
@@ -108,16 +107,6 @@ func TestGetPayloadResponseIsEmpty(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "Non-empty capella payload response",
-			payload: &builderApi.VersionedSubmitBlindedBlockResponse{
-				Version: spec.DataVersionCapella,
-				Capella: &capella.ExecutionPayload{
-					BlockHash: phase0.Hash32{0x1},
-				},
-			},
-			expected: false,
-		},
-		{
 			name: "Non-empty deneb payload response",
 			payload: &builderApi.VersionedSubmitBlindedBlockResponse{
 				Version: spec.DataVersionDeneb,
@@ -133,23 +122,6 @@ func TestGetPayloadResponseIsEmpty(t *testing.T) {
 				},
 			},
 			expected: false,
-		},
-		{
-			name: "Empty capella payload response",
-			payload: &builderApi.VersionedSubmitBlindedBlockResponse{
-				Version: spec.DataVersionCapella,
-			},
-			expected: true,
-		},
-		{
-			name: "Nil block hash for capella payload response",
-			payload: &builderApi.VersionedSubmitBlindedBlockResponse{
-				Version: spec.DataVersionCapella,
-				Capella: &capella.ExecutionPayload{
-					BlockHash: nilHash,
-				},
-			},
-			expected: true,
 		},
 		{
 			name: "Empty deneb payload response",
@@ -197,7 +169,7 @@ func TestGetPayloadResponseIsEmpty(t *testing.T) {
 		{
 			name: "Unsupported payload version",
 			payload: &builderApi.VersionedSubmitBlindedBlockResponse{
-				Version: spec.DataVersionBellatrix,
+				Version: spec.DataVersionAltair,
 			},
 			expected: true,
 		},

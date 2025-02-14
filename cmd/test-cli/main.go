@@ -10,7 +10,7 @@ import (
 
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
-	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
+	eth2ApiV1Deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/altair"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/common"
@@ -25,22 +25,22 @@ func doGenerateValidator(filePath string, gasLimit uint64, feeRecipient string) 
 	v := newRandomValidator(gasLimit, feeRecipient)
 	err := v.SaveValidator(filePath)
 	if err != nil {
-		log.WithError(err).Fatal("Could not save validator data")
+		log.WithError(err).Fatal("could not save validator data")
 	}
-	log.WithField("file", filePath).Info("Saved validator data")
+	log.WithField("file", filePath).Info("saved validator data")
 }
 
 func doRegisterValidator(v validatorPrivateData, boostEndpoint string, builderSigningDomain phase0.Domain) {
 	message, err := v.PrepareRegistrationMessage(builderSigningDomain)
 	if err != nil {
-		log.WithError(err).Fatal("Could not prepare registration message")
+		log.WithError(err).Fatal("could not prepare registration message")
 	}
 	_, err = server.SendHTTPRequest(context.TODO(), *http.DefaultClient, http.MethodPost, boostEndpoint+"/eth/v1/builder/validators", "test-cli", nil, message, nil)
 	if err != nil {
-		log.WithError(err).Fatal("Validator registration not successful")
+		log.WithError(err).Fatal("validator registration not successful")
 	}
 
-	log.WithError(err).Info("Registered validator")
+	log.WithError(err).Info("registered validator")
 }
 
 func doGetHeader(v validatorPrivateData, boostEndpoint string, beaconNode Beacon, engineEndpoint string, builderSigningDomain phase0.Domain) builderSpec.VersionedSignedBuilderBid {
@@ -72,20 +72,20 @@ func doGetHeader(v validatorPrivateData, boostEndpoint string, beaconNode Beacon
 
 	var getHeaderResp builderSpec.VersionedSignedBuilderBid
 	if _, err := server.SendHTTPRequest(context.TODO(), *http.DefaultClient, http.MethodGet, uri, "test-cli", nil, nil, &getHeaderResp); err != nil {
-		log.WithError(err).WithField("currentBlockHash", currentBlockHash).Fatal("Could not get header")
+		log.WithError(err).WithField("currentBlockHash", currentBlockHash).Fatal("could not get header")
 	}
 
-	if getHeaderResp.Capella.Message == nil {
-		log.Fatal("Did not receive correct header")
+	if getHeaderResp.Deneb.Message == nil {
+		log.Fatal("did not receive correct header")
 	}
-	log.WithField("header", *getHeaderResp.Capella.Message).Info("Got header from boost")
+	log.WithField("header", *getHeaderResp.Deneb.Message).Info("got header from boost")
 
-	ok, err := ssz.VerifySignature(getHeaderResp.Capella.Message, builderSigningDomain, getHeaderResp.Capella.Message.Pubkey[:], getHeaderResp.Capella.Signature[:])
+	ok, err := ssz.VerifySignature(getHeaderResp.Deneb.Message, builderSigningDomain, getHeaderResp.Deneb.Message.Pubkey[:], getHeaderResp.Deneb.Signature[:])
 	if err != nil {
-		log.WithError(err).Fatal("Could not verify builder bid signature")
+		log.WithError(err).Fatal("could not verify builder bid signature")
 	}
 	if !ok {
-		log.Fatal("Incorrect builder bid signature")
+		log.Fatal("incorrect builder bid signature")
 	}
 
 	return getHeaderResp
@@ -94,12 +94,12 @@ func doGetHeader(v validatorPrivateData, boostEndpoint string, beaconNode Beacon
 func doGetPayload(v validatorPrivateData, boostEndpoint string, beaconNode Beacon, engineEndpoint string, builderSigningDomain, proposerSigningDomain phase0.Domain) {
 	header := doGetHeader(v, boostEndpoint, beaconNode, engineEndpoint, builderSigningDomain)
 
-	blindedBeaconBlock := eth2ApiV1Capella.BlindedBeaconBlock{
+	blindedBeaconBlock := eth2ApiV1Deneb.BlindedBeaconBlock{
 		Slot:          0,
 		ProposerIndex: 0,
 		ParentRoot:    phase0.Root{},
 		StateRoot:     phase0.Root{},
-		Body: &eth2ApiV1Capella.BlindedBeaconBlockBody{
+		Body: &eth2ApiV1Deneb.BlindedBeaconBlockBody{
 			RANDAOReveal:           phase0.BLSSignature{},
 			ETH1Data:               &phase0.ETH1Data{},
 			Graffiti:               phase0.Hash32{},
@@ -109,7 +109,7 @@ func doGetPayload(v validatorPrivateData, boostEndpoint string, beaconNode Beaco
 			Deposits:               []*phase0.Deposit{},
 			VoluntaryExits:         []*phase0.SignedVoluntaryExit{},
 			SyncAggregate:          &altair.SyncAggregate{},
-			ExecutionPayloadHeader: header.Capella.Message.Header,
+			ExecutionPayloadHeader: header.Deneb.Message.Header,
 		},
 	}
 
@@ -118,7 +118,7 @@ func doGetPayload(v validatorPrivateData, boostEndpoint string, beaconNode Beaco
 		log.WithError(err).Fatal("could not sign blinded beacon block")
 	}
 
-	payload := eth2ApiV1Capella.SignedBlindedBeaconBlock{
+	payload := eth2ApiV1Deneb.SignedBlindedBeaconBlock{
 		Message:   &blindedBeaconBlock,
 		Signature: signature,
 	}
@@ -128,7 +128,7 @@ func doGetPayload(v validatorPrivateData, boostEndpoint string, beaconNode Beaco
 	}
 
 	if respPayload.IsEmpty() {
-		log.Fatal("Did not receive correct payload")
+		log.Fatal("did not receive correct payload")
 	}
 	log.WithField("payload", respPayload).Info("got payload from mev-boost")
 }
@@ -242,7 +242,7 @@ func main() {
 		}
 		doGetPayload(mustLoadValidator(validatorDataFile), boostEndpoint, createBeacon(isMergemock, beaconEndpoint, engineEndpoint), engineEndpoint, builderSigningDomain, proposerSigningDomain)
 	default:
-		log.Info("Expected generate|register|getHeader|getPayload subcommand")
+		log.Info("expected generate|register|getHeader|getPayload subcommand")
 		os.Exit(1)
 	}
 }
